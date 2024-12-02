@@ -1,24 +1,27 @@
 import Pyro4
 
+# Connect to the Pyro4 nameserver and get the remote object
+def connect_to_server():
+    # Connect to the Pyro4 Naming Server running on the server machine
+    # Replace <SERVER_IP> with the actual IP address of the machine running the server
+    server = Pyro4.Proxy("PYRONAME:email_scraper.server@192.168.100.23")
+    return server
+
 def main():
-    email_scraper = Pyro4.Proxy("PYRONAME:email_scraper.server")
+    # Get the server reference
+    server = connect_to_server()
 
-    target_url = input("[+] Enter Target URL to Scan: ").strip()
-    max_time_minutes = int(input("[+] Enter Scraping Time (in minutes): "))
-    max_nodes = int(input("[+] Enter Number of Nodes (pages) to Scrape: "))
+    # Input parameters
+    target_url = input("Enter Target URL to Scan: ").strip()
+    max_time_minutes = int(input("Enter Scraping Time (in minutes): "))
+    max_nodes = int(input("Enter Number of Nodes (pages) to Scrape: "))
 
-    print("[+] Starting scraping task...")
-    result = email_scraper.email_web_scraper(target_url, max_time_minutes, max_nodes)
+    # Call the scraping function
+    result = server.email_web_scraper(target_url, max_time_minutes, max_nodes)
 
-    # Print or save results
-    print("\n[+] Scraping Statistics:")
-    print(f"URL: {result['stats']['url']}")
-    print(f"Pages Scraped: {result['stats']['pages_scraped']}")
-    print(f"Emails Found: {result['stats']['emails_found']}")
-
-    print("\n[+] Emails:")
-    for email, details in result["emails"].items():
-        print(f"{email}: {details}")
+    # Output the results
+    print(f"Scraping completed. Results saved in {result['emails_file_path']} and {result['stats_file_path']}.")
+    print(f"Emails found: {result['emails_found']}, Pages scraped: {result['pages_scraped']}")
 
 if __name__ == "__main__":
     main()
