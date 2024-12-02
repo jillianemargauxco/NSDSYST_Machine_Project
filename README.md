@@ -70,7 +70,7 @@ The server uses **coordination techniques** to manage concurrent requests from m
 
 3. Start the Pyro4 nameserver:
    ```bash
-  python -m Pyro4.naming -n <SERVER_IP>
+   python -m Pyro4.naming -n <SERVER_IP>
    ```
 
 4. Start the server:
