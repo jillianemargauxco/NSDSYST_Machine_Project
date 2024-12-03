@@ -16,7 +16,7 @@ class EmailScraperServer:
         self.lock = threading.Lock()
         self.client_counter = 0
         self.nodes = []  
-
+    
     def create_nodes(self, max_nodes):
         """Automatically create and register nodes based on max_nodes."""
         with self.lock:
@@ -121,8 +121,6 @@ class EmailScraperServer:
             print(f"[ERROR] Exception in email_web_scraper: {e}")
             raise
 
-
-
     def crawl_target_url(self, target_url):
         """Crawl the target URL to get all the internal links."""
         urls = set()
@@ -152,13 +150,23 @@ class EmailScraperServer:
             print(f"[!] Error scraping emails from {url}: {e}")
         return page_emails
 
+def get_server_config():
+        config = {}
+        with open("config.txt", "r") as f:
+            for line in f:
+                key, value = line.strip().split("=")
+                config[key] = value
+        server_ip = config["server_ip"]
+        return server_ip
+
 def start_server():
+    server_host = get_server_config()
     Pyro4.Daemon.serveSimple(
         {
             EmailScraperServer: "email_scraper.server"
         },
         ns=True,
-        host="192.168.100.23",
+        host=server_host,
         verbose=True
     )
 
