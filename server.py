@@ -8,6 +8,7 @@ import time
 import threading
 import csv
 import os
+import uuid
 
 @Pyro4.expose
 class EmailScraperServer:
@@ -28,8 +29,8 @@ class EmailScraperServer:
             self.create_nodes(max_nodes)
             
             with self.lock:
-                self.client_counter += 1
-                client_id = self.client_counter
+                client_id = str(uuid.uuid4()).split('-')[0] 
+            
             print(f"[+] Client {client_id} connected and started a scraping task.")
 
             # Step 1: Crawl the target URL and get all URLs to scrape
@@ -146,7 +147,7 @@ class EmailScraperServer:
         page_emails = []
         try:
             response = requests.get(url, timeout=10)
-            page_emails = re.findall(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9-]+\.[a-zA-Z]{2,}", response.text)
+            page_emails = re.findall(r"[A-Za-z0-9._%+-]+@dlsu\.edu\.ph", response.text)
         except requests.exceptions.RequestException as e:
             print(f"[!] Error scraping emails from {url}: {e}")
         return page_emails
