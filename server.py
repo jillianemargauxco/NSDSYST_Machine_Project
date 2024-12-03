@@ -1,14 +1,13 @@
 import Pyro4
-from collections import deque
-import requests
-from bs4 import BeautifulSoup
 import re
-import urllib.parse
+import requests
 import time
 import threading
 import csv
 import os
 import uuid
+import urllib.parse
+from bs4 import BeautifulSoup  # Import BeautifulSoup
 
 @Pyro4.expose
 class EmailScraperServer:
@@ -122,20 +121,25 @@ class EmailScraperServer:
             raise
 
     def crawl_target_url(self, target_url):
-        """Crawl the target URL to get all the internal links."""
+        """Crawl the target URL to get all the internal links using BeautifulSoup."""
         urls = set()
         base_url = urllib.parse.urlsplit(target_url).scheme + '://' + urllib.parse.urlsplit(target_url).hostname
         try:
             response = requests.get(target_url, timeout=10)
             response.raise_for_status()
-            soup = BeautifulSoup(response.text, "lxml")
-            for anchor in soup.find_all("a", href=True):
-                link = anchor['href']
-                if link.startswith('/'):
-                    link = base_url + link
-                elif not link.startswith('http'):
-                    link = urllib.parse.urljoin(base_url, link)
-                urls.add(link)
+
+            # Use BeautifulSoup to parse HTML and extract all URLs
+            soup = BeautifulSoup(response.text, 'html.parser')
+            links = soup.find_all('a', href=True)
+
+            for link in links:
+                href = link['href']
+                if href.startswith('/'):
+                    href = base_url + href
+                elif not href.startswith('http'):
+                    href = urllib.parse.urljoin(base_url, href)
+                urls.add(href)
+
         except requests.exceptions.RequestException as e:
             print(f"[!] Error crawling {target_url}: {e}")
         return list(urls)
@@ -145,10 +149,20 @@ class EmailScraperServer:
         page_emails = []
         try:
             response = requests.get(url, timeout=10)
-            page_emails = re.findall(r"[A-Za-z0-9._%+-]+@dlsu\.edu\.ph", response.text)
+            email_regex = r'data-cfemail="([a-fA-F0-9]+)"'
+            page_emails = self.decode_cfemail(response.text, email_regex)
         except requests.exceptions.RequestException as e:
-            print(f"[!] Error scraping emails from {url}: {e}")
+            pass
         return page_emails
+
+    def decode_cfemail(self, page_content, email_regex):
+        """Decode Cloudflare's obfuscated email addresses."""
+        emails = re.findall(email_regex, page_content)
+        decoded_emails = []
+        for email in emails:
+            decoded_email = ''.join(chr(int(email[i:i+2], 16) ^ int(email[:2], 16)) for i in range(2, len(email), 2))
+            decoded_emails.append(decoded_email)
+        return decoded_emails
 
 def get_server_config():
         config = {}
