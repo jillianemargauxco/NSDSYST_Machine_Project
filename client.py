@@ -12,7 +12,7 @@ def main():
 
     target_url = input("Enter Target URL to Scan: ").strip()
     max_time_minutes = int(input("Enter Scraping Time (in minutes): "))
-    max_nodes = int(input("Enter Number of Nodes (pages) to Scrape: "))
+    max_nodes = int(input("Enter Number of Nodes: "))
 
 
     result = server.email_web_scraper(target_url, max_time_minutes, max_nodes)

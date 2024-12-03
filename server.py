@@ -12,112 +12,153 @@ import os
 @Pyro4.expose
 class EmailScraperServer:
     def __init__(self):
-        self.lock = threading.Lock() 
-        self.client_counter = 0 
+        self.lock = threading.Lock()
+        self.client_counter = 0
+        self.nodes = []  
+
+    def create_nodes(self, max_nodes):
+        """Automatically create and register nodes based on max_nodes."""
+        with self.lock:
+            self.nodes = [f"node_{i+1}" for i in range(max_nodes)]
+            print(f"[+] Created and registered {max_nodes} nodes: {self.nodes}")
 
     def email_web_scraper(self, target_url, max_time_minutes, max_nodes):
-        with self.lock:
-            self.client_counter += 1  
-            client_id = self.client_counter
-        print(f"[+] Client {client_id} connected and started a scraping task.")
+        try:
+            # Automatically create nodes based on max_nodes
+            self.create_nodes(max_nodes)
+            
+            with self.lock:
+                self.client_counter += 1
+                client_id = self.client_counter
+            print(f"[+] Client {client_id} connected and started a scraping task.")
 
-        urls = deque([target_url])
-        scraped_urls = set()
-        emails = {}
-        stats = {"url": target_url, "pages_scraped": 0, "emails_found": 0}
-        start_time = time.time()
+            # Step 1: Crawl the target URL and get all URLs to scrape
+            urls = self.crawl_target_url(target_url)
+            total_urls = len(urls)
+            if total_urls == 0:
+                raise ValueError(f"No URLs found to scrape from {target_url}")
 
-        while urls:
-            if (time.time() - start_time) / 60 > max_time_minutes:
-                break
+            print(f"[+] Total URLs to scrape: {total_urls}")
 
-            if stats["pages_scraped"] >= max_nodes:
-                break
+            # Step 2: Distribute URLs across the nodes
+            urls_per_node = total_urls // max_nodes
+            nodes_workload = {node_id: [] for node_id in self.nodes}  # Initialize empty workloads for each node
 
-            url = urls.popleft()
-            scraped_urls.add(url)
-            stats["pages_scraped"] += 1
+            for i, url in enumerate(urls):
+                node_id = self.nodes[i % max_nodes]  # Distribute URLs to nodes
+                nodes_workload[node_id].append(url)
 
-            parts = urllib.parse.urlsplit(url)
-            base_url = '{0.scheme}://{0.netloc}'.format(parts)
-            path = url[:url.rfind('/') + 1] if '/' in parts.path else url
+            # Step 3: Scrape emails on each node (simulated using threads)
+            emails = {}
+            stats = {"url": target_url, "pages_scraped": 0, "emails_found": 0}
 
-            try:
-                response = requests.get(url, timeout=10)
-                response.raise_for_status()  
-            except requests.exceptions.MissingSchema as e:
-                print(f"[!] Invalid URL schema: {url}")
-                continue 
-            except requests.exceptions.ConnectionError as e:
-                print(f"[!] Connection error: {url}")
-                continue
-            except requests.exceptions.Timeout as e:
-                print(f"[!] Timeout error: {url}")
-                continue
-            except requests.exceptions.HTTPError as e:
-                print(f"[!] HTTP error: {url}")
-                continue
-            except requests.exceptions.RequestException as e:
-                print(f"[!] Request failed: {url} - {e}")
-                continue
+            # Keep track of the start time to enforce the max time limit
+            start_time = time.time()
 
+            def scrape_emails(node_id, urls_to_scrape):
+                """Function to scrape emails for a specific node."""
+                nonlocal emails, stats
+                print(f"[+] Node {node_id} starting email scraping...")
+                node_emails = set()
 
-       
-            page_emails = re.findall(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9-]+\.[a-zA-Z]{2,}", response.text)
+                for url in urls_to_scrape:
+                    # Check if we've exceeded the max time
+                    elapsed_time = (time.time() - start_time) / 60  # in minutes
+                    if elapsed_time > max_time_minutes:
+                        print(f"[!] Max time exceeded, stopping scraping on Node {node_id}.")
+                        break
 
-            for email in page_emails:
-                with self.lock:  
-                    if email not in emails:
-                        emails[email] = {"name": "N/A", "office": "N/A", "department": "N/A"}
+                    page_emails = self.scrape_page_emails(url)
+                    node_emails.update(page_emails)
+                    stats["pages_scraped"] += 1
+
+                with self.lock:
+                    for email in node_emails:
+                        if email not in emails:
+                            emails[email] = {"name": "N/A", "office": "N/A", "department": "N/A"}
+
+                print(f"[+] Node {node_id} finished scraping. Found {len(node_emails)} emails.")
+
+            threads = []
+            for node_id, urls_to_scrape in nodes_workload.items():
+                thread = threading.Thread(target=scrape_emails, args=(node_id, urls_to_scrape))
+                threads.append(thread)
+                thread.start()
+
+            # Wait for all threads (nodes) to finish
+            for thread in threads:
+                thread.join()
 
             stats["emails_found"] = len(emails)
 
+            # Step 4: Save results to CSV
+            emails_file = f"emails_scrape_{client_id}.csv"
+            stats_file = f"scraping_stats_{client_id}.csv"
+
+            emails_file_path = os.path.abspath(emails_file)
+            with open(emails_file, "w", newline='', encoding='utf-8') as email_file:
+                csv_writer = csv.writer(email_file)
+                csv_writer.writerow(["Email", "Name", "Office", "Department"])
+                for email, details in emails.items():
+                    csv_writer.writerow([email, details["name"], details["office"], details["department"]])
+
+            stats_file_path = os.path.abspath(stats_file)
+            with open(stats_file, "w", newline='', encoding='utf-8') as stats_file:
+                csv_writer = csv.writer(stats_file)
+                csv_writer.writerow(["Website URL", "Pages Scraped", "Emails Found"])
+                csv_writer.writerow([stats["url"], stats["pages_scraped"], stats["emails_found"]])
+
+            print(f"[+] Client {client_id}: Scraping completed. Files saved as {emails_file_path} and {stats_file_path}.")
+            return {
+                "emails_file_path": emails_file_path,
+                "stats_file_path": stats_file_path,
+                "emails_found": stats["emails_found"],
+                "pages_scraped": stats["pages_scraped"]
+            }
+
+        except Exception as e:
+            print(f"[ERROR] Exception in email_web_scraper: {e}")
+            raise
+
+
+
+    def crawl_target_url(self, target_url):
+        """Crawl the target URL to get all the internal links."""
+        urls = set()
+        base_url = urllib.parse.urlsplit(target_url).scheme + '://' + urllib.parse.urlsplit(target_url).hostname
+        try:
+            response = requests.get(target_url, timeout=10)
+            response.raise_for_status()
             soup = BeautifulSoup(response.text, "lxml")
             for anchor in soup.find_all("a", href=True):
                 link = anchor['href']
                 if link.startswith('/'):
                     link = base_url + link
                 elif not link.startswith('http'):
-                    link = path + link
-                if link not in urls and link not in scraped_urls:
-                    urls.append(link)
+                    link = urllib.parse.urljoin(base_url, link)
+                urls.add(link)
+        except requests.exceptions.RequestException as e:
+            print(f"[!] Error crawling {target_url}: {e}")
+        return list(urls)
 
-      
-        emails_file = f"emails_scrape_{client_id}.csv"
-        stats_file = f"scraping_stats_{client_id}.csv"
-
-        emails_file_path = os.path.abspath(emails_file)
-        with open(emails_file, "w", newline='', encoding='utf-8') as email_file:
-            csv_writer = csv.writer(email_file)
-            csv_writer.writerow(["Email", "Name", "Office", "Department"])
-            for email, details in emails.items():
-                csv_writer.writerow([email, details["name"], details["office"], details["department"]])
-
-        stats_file_path = os.path.abspath(stats_file)
-        with open(stats_file, "w", newline='', encoding='utf-8') as stats_file:
-            csv_writer = csv.writer(stats_file)
-            csv_writer.writerow(["Website URL", "Pages Scraped", "Emails Found"])
-            csv_writer.writerow([stats["url"], stats["pages_scraped"], stats["emails_found"]])
-        
-
-
-        print(f"[+] Client {client_id}: Scraping completed. Files saved as {emails_file_path} and {stats_file_path}.")
-        return {
-            "emails_file_path": emails_file_path,
-            "stats_file_path": stats_file_path,
-            "emails_found": stats["emails_found"],
-            "pages_scraped": stats["pages_scraped"]
-        }
+    def scrape_page_emails(self, url):
+        """Scrape email addresses from the page."""
+        page_emails = []
+        try:
+            response = requests.get(url, timeout=10)
+            page_emails = re.findall(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9-]+\.[a-zA-Z]{2,}", response.text)
+        except requests.exceptions.RequestException as e:
+            print(f"[!] Error scraping emails from {url}: {e}")
+        return page_emails
 
 def start_server():
-    
     Pyro4.Daemon.serveSimple(
         {
             EmailScraperServer: "email_scraper.server"
         },
-        ns=True,  
-        host="192.168.100.23", 
-        verbose=True  
+        ns=True,
+        host="192.168.100.23",
+        verbose=True
     )
 
 if __name__ == "__main__":
