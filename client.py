@@ -1,13 +1,20 @@
 import Pyro4
 
+def get_server_config():
+    config = {}
+    with open("config.txt", "r") as f:
+        for line in f:
+            key, value = line.strip().split("=")
+            config[key] = value
+    server_ip = config["server_ip"]
+    return server_ip
 
 def connect_to_server():
-  
-    server = Pyro4.Proxy("PYRONAME:email_scraper.server@192.168.100.23")
+    server_ip = get_server_config()
+    server = Pyro4.Proxy("PYRONAME:email_scraper.server@" + server_ip)
     return server
 
 def main():
- 
     server = connect_to_server()
 
     target_url = input("Enter Target URL to Scan: ").strip()
