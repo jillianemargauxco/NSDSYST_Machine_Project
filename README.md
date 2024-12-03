@@ -10,10 +10,10 @@ The project demonstrates the principles of **message passing** and **coordinatio
 
 ## Team Members
 
-Aperin, Johanna
-Elloso, Jilliane
-Pecson, Richard
-Ypaguirre, Gebromel
+Aperin, Johanna <br>
+Elloso, Jilliane <br>
+Pecson, Richard <br>
+Ypaguirre, Gebromel <br>
 
 ---
 
