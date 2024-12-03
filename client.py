@@ -17,7 +17,7 @@ def connect_to_server():
 def main():
     server = connect_to_server()
 
-    target_url = input("Enter Target URL to Scan: ").strip()
+    target_url = "https://www.dlsu.edu.ph"
     max_time_minutes = int(input("Enter Scraping Time (in minutes): "))
     max_nodes = int(input("Enter Number of Nodes: "))
 
