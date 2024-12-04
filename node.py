@@ -30,7 +30,7 @@ class EmailScraperNode:
         print(f"[+] Scraping completed. Emails found: {len(results)}")
         return results
 
-    def decode_cfemail(self, html_content):
+    def decode_cfemail(self, html_content, email_regex):
         """Decode Cloudflare obfuscated emails."""
         email_regex = r'data-cfemail="([a-fA-F0-9]+)"'
         encoded_emails = re.findall(email_regex, html_content)

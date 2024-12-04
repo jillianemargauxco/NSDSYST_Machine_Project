@@ -40,25 +40,39 @@ class EmailScraperCoordinator:
     def email_web_scraper(self, target_url, max_time_minutes, max_nodes):
         """Main method to scrape emails using registered worker nodes."""
         print(f"[+] Starting scraping for {target_url}")
+    
+        # Step 1: Crawl the target URL to get the list of all URLs to scrape
         urls = self.crawl_target_url(target_url)
         if not urls:
             raise ValueError(f"No URLs found to scrape from {target_url}")
 
-        workloads = self.distribute_work(urls[:max_nodes])  # Use up to max_nodes URLs
+        print(f"[+] Total URLs found: {len(urls)}")
+        
+        if not self.nodes:
+            raise ValueError("No nodes are available for scraping.")
+
+        # Step 3: Distribute workloads (urls) across nodes
+        workloads = self.distribute_work(urls)
+        print(f"[+] Workload distributed to nodes: {len(workloads)} nodes.")
+
+        # Step 4: Initialize results and stats tracking
         results = []
         stats = {"pages_scraped": 0, "emails_found": 0}
-
-        # Create threads to handle worker node calls
         threads = []
 
         def scrape_on_node(node_id, urls_to_scrape):
-            uri = self.nodes[node_id]
-            node_proxy = Pyro4.Proxy(uri)
-            node_results = node_proxy.scrape_emails(urls_to_scrape, max_time_minutes)
-            with self.lock:
-                results.extend(node_results)
-                stats["pages_scraped"] += len(urls_to_scrape)
-                stats["emails_found"] += len(node_results)
+            try:
+                uri = self.nodes[node_id]
+                node_proxy = Pyro4.Proxy(uri)
+                node_results = node_proxy.scrape_emails(urls_to_scrape, max_time_minutes)
+                with self.lock:
+                    results.extend(node_results)
+                    stats["pages_scraped"] += len(urls_to_scrape)
+                    stats["emails_found"] += len(node_results)
+            except Exception as e:
+                print(f"[!] Error in node {node_id}: {e}")
+         
+
 
         for node_id, urls_to_scrape in workloads.items():
             thread = threading.Thread(target=scrape_on_node, args=(node_id, urls_to_scrape))
