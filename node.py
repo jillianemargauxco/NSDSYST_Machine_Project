@@ -20,10 +20,8 @@ class EmailScraperNode:
                     break
 
                 response = requests.get(url, timeout=10)
-                emails = self.decode_cfemail(response.text)
-
-                # Regular email pattern
-                emails += re.findall(r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+', response.text)
+                email_regex = re.findall(r"[A-Za-z0-9._%+-]+@dlsu\.edu\.ph", response.text)
+                emails = self.decode_cfemail(response.text, email_regex)
                 results.extend(emails)
 
             except requests.RequestException as e:
