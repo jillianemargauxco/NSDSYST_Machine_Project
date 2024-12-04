@@ -54,9 +54,17 @@ def start_worker_node(node_id, server_ip):
     print(f"[+] Worker Node {node_id} ready and registered with server {server_ip}.")
     daemon.requestLoop()
 
+def get_server_config():
+        config = {}
+        with open("config.txt", "r") as f:
+            for line in f:
+                key, value = line.strip().split("=")
+                config[key] = value
+        server_ip = config["server_ip"]
+        return server_ip
 
 if __name__ == "__main__":
-    server_ip = input("Enter Server IP Address: ").strip()
+    server_ip = get_server_config().strip()
     while True:
         node_id = input("Enter Worker Node ID: ").strip()
         if node_id:
