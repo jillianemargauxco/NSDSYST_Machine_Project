@@ -1,127 +1,104 @@
 import Pyro4
-import re
+import threading
 import requests
 import time
-import threading
+import urllib.parse
+from bs4 import BeautifulSoup
 import csv
 import os
 import uuid
-import urllib.parse
-from bs4 import BeautifulSoup  # Import BeautifulSoup
+import re
+
 
 @Pyro4.expose
-class EmailScraperServer:
+class EmailScraperCoordinator:
     def __init__(self):
+        self.nodes = {}
         self.lock = threading.Lock()
-        self.client_counter = 0
-        self.nodes = []  
-    
-    def create_nodes(self, max_nodes):
-        """Automatically create and register nodes based on max_nodes."""
+
+    def register_node(self, node_id, node_uri):
+        """Register a new worker node with the central server."""
         with self.lock:
-            self.nodes = [f"node_{i+1}" for i in range(max_nodes)]
-            print(f"[+] Created and registered {max_nodes} nodes: {self.nodes}")
+            self.nodes[node_id] = node_uri
+            print(f"[+] Node {node_id} registered with URI {node_uri}")
+            print(f"Current nodes: {self.nodes}")
+
+    def distribute_work(self, urls):
+        """Distribute URLs across the registered worker nodes."""
+        print(self.nodes)
+        node_count = len(self.nodes)
+        if node_count == 0:
+            raise RuntimeError("No nodes registered to perform the work.")
+
+        workloads = {node_id: [] for node_id in self.nodes}
+        for i, url in enumerate(urls):
+            node_id = list(self.nodes.keys())[i % node_count]
+            workloads[node_id].append(url)
+
+        return workloads
 
     def email_web_scraper(self, target_url, max_time_minutes, max_nodes):
-        try:
-            # Automatically create nodes based on max_nodes
-            self.create_nodes(max_nodes)
-            
+        """Main method to scrape emails using registered worker nodes."""
+        print(f"[+] Starting scraping for {target_url}")
+        urls = self.crawl_target_url(target_url)
+        if not urls:
+            raise ValueError(f"No URLs found to scrape from {target_url}")
+
+        workloads = self.distribute_work(urls[:max_nodes])  # Use up to max_nodes URLs
+        results = []
+        stats = {"pages_scraped": 0, "emails_found": 0}
+
+        # Create threads to handle worker node calls
+        threads = []
+
+        def scrape_on_node(node_id, urls_to_scrape):
+            uri = self.nodes[node_id]
+            node_proxy = Pyro4.Proxy(uri)
+            node_results = node_proxy.scrape_emails(urls_to_scrape, max_time_minutes)
             with self.lock:
-                client_id = str(uuid.uuid4()).split('-')[0] 
-            
-            print(f"[+] Client {client_id} connected and started a scraping task.")
+                results.extend(node_results)
+                stats["pages_scraped"] += len(urls_to_scrape)
+                stats["emails_found"] += len(node_results)
 
-            # Step 1: Crawl the target URL and get all URLs to scrape
-            urls = self.crawl_target_url(target_url)
-            total_urls = len(urls)
-            if total_urls == 0:
-                raise ValueError(f"No URLs found to scrape from {target_url}")
+        for node_id, urls_to_scrape in workloads.items():
+            thread = threading.Thread(target=scrape_on_node, args=(node_id, urls_to_scrape))
+            threads.append(thread)
+            thread.start()
 
-            print(f"[+] Total URLs to scrape: {total_urls}")
+        for thread in threads:
+            thread.join()
 
-            # Step 2: Distribute URLs across the nodes
-            urls_per_node = total_urls // max_nodes
-            nodes_workload = {node_id: [] for node_id in self.nodes}  # Initialize empty workloads for each node
+        # Save the results to CSV files
+        client_id = str(uuid.uuid4()).split('-')[0]
+        emails_file = f"emails_scrape_{client_id}.csv"
+        stats_file = f"scraping_stats_{client_id}.csv"
 
-            for i, url in enumerate(urls):
-                node_id = self.nodes[i % max_nodes]  # Distribute URLs to nodes
-                nodes_workload[node_id].append(url)
+        emails_file_path = os.path.abspath(emails_file)
+        stats_file_path = os.path.abspath(stats_file)
 
-            # Step 3: Scrape emails on each node (simulated using threads)
-            emails = {}
-            stats = {"url": target_url, "pages_scraped": 0, "emails_found": 0}
+        # Save Emails
+        with open(emails_file, "w", newline='', encoding="utf-8") as file:
+            writer = csv.writer(file)
+            writer.writerow(["Email"])
+            for email in results:
+                writer.writerow([email])
 
-            # Keep track of the start time to enforce the max time limit
-            start_time = time.time()
+        # Save Stats
+        with open(stats_file, "w", newline='', encoding="utf-8") as file:
+            writer = csv.writer(file)
+            writer.writerow(["Pages Scraped", "Emails Found"])
+            writer.writerow([stats["pages_scraped"], stats["emails_found"]])
 
-            def scrape_emails(node_id, urls_to_scrape):
-                """Function to scrape emails for a specific node."""
-                nonlocal emails, stats
-                print(f"[+] Node {node_id} starting email scraping...")
-                node_emails = set()
-
-                for url in urls_to_scrape:
-                    # Check if we've exceeded the max time
-                    elapsed_time = (time.time() - start_time) / 60  # in minutes
-                    if elapsed_time > max_time_minutes:
-                        print(f"[!] Max time exceeded, stopping scraping on Node {node_id}.")
-                        break
-
-                    page_emails = self.scrape_page_emails(url)
-                    node_emails.update(page_emails)
-                    stats["pages_scraped"] += 1
-
-                with self.lock:
-                    for email in node_emails:
-                        if email not in emails:
-                            emails[email] = {"name": "N/A", "office": "N/A", "department": "N/A"}
-
-                print(f"[+] Node {node_id} finished scraping. Found {len(node_emails)} emails.")
-
-            threads = []
-            for node_id, urls_to_scrape in nodes_workload.items():
-                thread = threading.Thread(target=scrape_emails, args=(node_id, urls_to_scrape))
-                threads.append(thread)
-                thread.start()
-
-            # Wait for all threads (nodes) to finish
-            for thread in threads:
-                thread.join()
-
-            stats["emails_found"] = len(emails)
-
-            # Step 4: Save results to CSV
-            emails_file = f"emails_scrape_{client_id}.csv"
-            stats_file = f"scraping_stats_{client_id}.csv"
-
-            emails_file_path = os.path.abspath(emails_file)
-            with open(emails_file, "w", newline='', encoding='utf-8') as email_file:
-                csv_writer = csv.writer(email_file)
-                csv_writer.writerow(["Email", "Name", "Office", "Department"])
-                for email, details in emails.items():
-                    csv_writer.writerow([email, details["name"], details["office"], details["department"]])
-
-            stats_file_path = os.path.abspath(stats_file)
-            with open(stats_file, "w", newline='', encoding='utf-8') as stats_file:
-                csv_writer = csv.writer(stats_file)
-                csv_writer.writerow(["Website URL", "Pages Scraped", "Emails Found"])
-                csv_writer.writerow([stats["url"], stats["pages_scraped"], stats["emails_found"]])
-
-            print(f"[+] Client {client_id}: Scraping completed. Files saved as {emails_file_path} and {stats_file_path}.")
-            return {
-                "emails_file_path": emails_file_path,
-                "stats_file_path": stats_file_path,
-                "emails_found": stats["emails_found"],
-                "pages_scraped": stats["pages_scraped"]
-            }
-
-        except Exception as e:
-            print(f"[ERROR] Exception in email_web_scraper: {e}")
-            raise
+        print(f"[+] Results saved to {emails_file_path} and {stats_file_path}")
+        return {
+            "emails_file_path": emails_file_path,
+            "stats_file_path": stats_file_path,
+            "emails_found": stats["emails_found"],
+            "pages_scraped": stats["pages_scraped"]
+        }
 
     def crawl_target_url(self, target_url):
-        """Crawl the target URL to get all the internal links."""
+        """Crawl the target URL to get all internal links."""
         urls = set()
         base_url = urllib.parse.urlsplit(target_url).scheme + '://' + urllib.parse.urlsplit(target_url).hostname
         try:
@@ -139,26 +116,6 @@ class EmailScraperServer:
             print(f"[!] Error crawling {target_url}: {e}")
         return list(urls)
 
-    def scrape_page_emails(self, url):
-        """Scrape email addresses from the page."""
-        page_emails = []
-        try:
-            response = requests.get(url, timeout=10)
-            email_regex = r'data-cfemail="([a-fA-F0-9]+)"'
-            page_emails = self.decode_cfemail(response.text, email_regex)
-        except requests.exceptions.RequestException as e:
-            print(f"[!] Error scraping emails from {url}")
-        return page_emails
-
-    def decode_cfemail(self, page_content, email_regex):
-        """Decode Cloudflare's obfuscated email addresses."""
-        emails = re.findall(email_regex, page_content)
-        decoded_emails = []
-        for email in emails:
-            decoded_email = ''.join(chr(int(email[i:i+2], 16) ^ int(email[:2], 16)) for i in range(2, len(email), 2))
-            decoded_emails.append(decoded_email)
-        return decoded_emails
-
 def get_server_config():
         config = {}
         with open("config.txt", "r") as f:
@@ -170,14 +127,17 @@ def get_server_config():
 
 def start_server():
     server_host = get_server_config()
+    coordinator_instance = EmailScraperCoordinator()  
     Pyro4.Daemon.serveSimple(
         {
-            EmailScraperServer: "email_scraper.server"
+            coordinator_instance: "email_scraper.server"
         },
         ns=True,
         host=server_host,
         verbose=True
     )
+
+
 
 if __name__ == "__main__":
     print("Starting Email Scraper Server...")
