@@ -27,7 +27,7 @@ def main():
         server = connect_to_server()
 
         # Get user inputs for the target URL, max scraping time, and nodes
-        target_url = input("Enter Target URL (e.g., https://example.com): ").strip()
+        target_url = "https://www.dlsu.edu.ph".strip()
         max_time_minutes = int(input("Enter Scraping Time (in minutes): "))
         max_nodes = int(input("Enter Number of Nodes: "))
 
